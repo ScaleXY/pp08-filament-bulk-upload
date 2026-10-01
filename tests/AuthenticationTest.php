@@ -17,6 +17,24 @@ class AuthenticationTest extends TestCase
         $app['config']->set('filament-bulk-upload.middleware', ['web', 'auth:tenant_admin']);
     }
 
+    public static function tenantKey(): ?string
+    {
+        return config('tests.current_tenant');
+    }
+
+    public function test_cached_static_resolver_reads_the_current_tenant_at_runtime(): void
+    {
+        $resolver = [self::class, 'tenantKey'];
+        $cachedResolver = eval('return '.var_export($resolver, true).';');
+        config(['filament-bulk-upload.tenant_resolver' => $cachedResolver]);
+        $access = app(Access::class);
+        $this->assertNull($access->tenant());
+        config(['tests.current_tenant' => 'tenant-a']);
+        $this->assertSame('tenant-a', $access->tenant());
+        config(['tests.current_tenant' => 'tenant-b']);
+        $this->assertSame('tenant-b', $access->tenant());
+    }
+
     public function test_upload_routes_require_the_matching_session_csrf_token(): void
     {
         Route::getRoutes()->getByName('bulk-upload.sessions')->middleware(StrictCsrfMiddleware::class);

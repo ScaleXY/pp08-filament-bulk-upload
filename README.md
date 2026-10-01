@@ -121,8 +121,21 @@ The field detects the current Filament panel's authentication guard. Package rou
     \Stancl\Tenancy\Middleware\PreventAccessFromUnwantedDomains::class,
     'auth:tenant_admin',
 ],
-'tenant_resolver' => static fn () => tenant()?->getTenantKey(),
+'tenant_resolver' => [\App\Providers\TenancyServiceProvider::class, 'bulkUploadTenantKey'],
 ```
+
+Define the static resolver on the application's tenancy provider:
+
+```php
+public static function bulkUploadTenantKey(): ?string
+{
+    $key = tenant()?->getTenantKey();
+
+    return $key === null ? null : (string) $key;
+}
+```
+
+Use static method callables such as `[Resolver::class, 'resolve']` in configuration files. Laravel's `config:cache` cannot serialize closures. The resolver is called for each request, so the cached configuration does not capture a particular tenant. This also applies to custom `authorize` and `validate_upload` callbacks.
 
 Tenancy must initialize before session and CSRF middleware through the host's middleware priority configuration. Upload requests use a relative endpoint and the page's CSRF token, including Filament/Livewire pages without a CSRF meta tag. After updating the package, run `php artisan filament:assets` to publish the updated JavaScript.
 
