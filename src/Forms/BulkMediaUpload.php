@@ -4,10 +4,12 @@ namespace ScaleXY\FilamentBulkUpload\Forms;
 
 use Closure;
 use Filament\Forms\Components\Field;
+use Illuminate\Filesystem\AwsS3V3Adapter;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Validation\ValidationException;
 use ScaleXY\FilamentBulkUpload\Support\Access;
 use ScaleXY\FilamentBulkUpload\Support\BatchManager;
+use ScaleXY\FilamentBulkUpload\Support\UploadDisk;
 use Spatie\MediaLibrary\HasMedia;
 
 class BulkMediaUpload extends Field
@@ -17,6 +19,8 @@ class BulkMediaUpload extends Field
     protected string|Closure $mediaCollection = 'default';
 
     protected string|Closure|null $uploadDisk = null;
+
+    protected AwsS3V3Adapter|Closure|null $uploadDiskInstance = null;
 
     protected int|Closure $fileLimit = 1000;
 
@@ -72,6 +76,14 @@ class BulkMediaUpload extends Field
         return $this;
     }
 
+    /** Keep disk() as the persistent Media Library disk name. */
+    public function diskInstance(AwsS3V3Adapter|Closure $disk): static
+    {
+        $this->uploadDiskInstance = $disk;
+
+        return $this;
+    }
+
     public function maxFiles(int|Closure $count): static
     {
         $this->fileLimit = $count;
@@ -121,7 +133,11 @@ class BulkMediaUpload extends Field
             throw new \InvalidArgumentException('Invalid bulk upload limits (1–1000 files, positive size, 1–16 concurrent uploads).');
         }
 
+        $instance = $this->evaluate($this->uploadDiskInstance);
+        $diskSettings = $instance === null ? [] : app(UploadDisk::class)->snapshot($instance);
+
         return array_filter([
+            ...$diskSettings,
             'model' => $model, 'record' => $this->getRecord()?->exists ? (string) $this->getRecord()->getKey() : null,
             'collection' => $this->evaluate($this->mediaCollection), 'disk' => $this->evaluate($this->uploadDisk) ?? config('filament-bulk-upload.disk'),
             'max_files' => $maxFiles, 'max_bytes' => $maxBytes, 'types' => $this->evaluate($this->fileTypes), 'concurrency' => $concurrency,
@@ -137,7 +153,7 @@ class BulkMediaUpload extends Field
         $settings = $this->settings();
 
         return ['token' => Crypt::encrypt(['owner' => $access->owner(), 'tenant' => $access->tenant(), 'expires' => time() + 86400, 'settings' => $settings]),
-            'endpoint' => route('bulk-upload.sessions'), 'maxFiles' => $settings['max_files'], 'maxBytes' => $settings['max_bytes'],
+            'endpoint' => route('bulk-upload.sessions', absolute: false), 'csrfToken' => csrf_token(), 'maxFiles' => $settings['max_files'], 'maxBytes' => $settings['max_bytes'],
             'concurrency' => $settings['concurrency'], 'readonly' => $settings['readonly']];
     }
 }

@@ -100,6 +100,32 @@ Spatie has its own size limit. Set `media-library.max_file_size` in **bytes** to
 
 ## Authorization and tenancy
 
+For tenant-specific on-demand S3 adapters, keep a stable disk name for Media Library and supply an adapter or a factory:
+
+```php
+BulkMediaUpload::make('media')
+    ->disk('tenant_s3')
+    ->diskInstance(fn () => Storage::build($tenantS3Configuration));
+```
+
+`diskInstance()` accepts Laravel's `AwsS3V3Adapter` or a Filament-evaluated closure returning one. Its configuration must be serializable (standard `Storage::build()` S3 configuration; client objects and credential-provider closures are unsupported). The package encrypts the configuration at rest and rebuilds the adapter for signing, verification, attachment and cleanup. It temporarily installs the adapter under the named disk for Spatie and restores the previous disk afterwards, including on failure. Keep the application encryption key available to queue workers. Explicit temporary credentials must remain valid for the lifetime of the batch. The host must still resolve the named disk for normal media access and separately queued conversions.
+
+The field detects the current Filament panel's authentication guard. Package routes also need the matching guard and tenancy middleware. For example, with a `tenant_admin` guard and Stancl domain tenancy:
+
+```php
+// config/filament-bulk-upload.php
+'auth_guard' => 'tenant_admin',
+'middleware' => [
+    'web',
+    \Stancl\Tenancy\Middleware\InitializeTenancyByDomain::class,
+    \Stancl\Tenancy\Middleware\PreventAccessFromUnwantedDomains::class,
+    'auth:tenant_admin',
+],
+'tenant_resolver' => static fn () => tenant()?->getTenantKey(),
+```
+
+Tenancy must initialize before session and CSRF middleware through the host's middleware priority configuration. Upload requests use a relative endpoint and the page's CSRF token, including Filament/Livewire pages without a CSRF meta tag. After updating the package, run `php artisan filament:assets` to publish the updated JavaScript.
+
 Routes use `web` and `auth` middleware, including Laravel CSRF protection. Laravel `create`/`update` policies are required by default. Replace the configured middleware for a custom guard and add any application-specific account checks. Configure `filament-bulk-upload.authorize` only when custom policy behavior is needed; its signature is `(user, modelOrClass, operation, tenant): bool`.
 
 Session settings are encrypted server-issued descriptors, bound to user, tenant, and field. The browser cannot choose storage keys, disks, collections, model classes, multipart identities, or attachment targets. Ownership and policy checks run on every endpoint and again at form save.
@@ -141,3 +167,5 @@ MINIO_ENDPOINT=http://127.0.0.1:19000 vendor/bin/phpunit --filter MinioTest
 Custom credentials: `MINIO_KEY` and `MINIO_SECRET`. The test exercises signed PUT, multipart parts/list/completion, immutable verification, and real Media Library attachment on the same S3 disk.
 
 For an AWS smoke test in a staging host, configure a disposable private bucket and the CORS/IAM above; upload one small file and a file over 100 MiB through the field, pause/resume the multipart file, save, run the worker, and verify signed previews and temporary cleanup. Repeat with a rejected type and a size above the field limit. AWS verification needs your account and staging configuration and is not exercised by the local test suite.
+
+Selected uploads and existing media display in paginated image grids. The bottom **Grid layout** selector defaults to **5 × 5** (25 per page), with **4 × 3** (12), **7 × 5** (35), and **4 × 4** (16) options. Columns adapt on narrow screens while keeping the selected page size. Local previews are limited to the visible page and their object URLs are released on page changes and field teardown. Existing media previews use signed URLs; other file types show a file placeholder.

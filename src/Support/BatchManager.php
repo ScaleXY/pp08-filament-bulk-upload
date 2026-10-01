@@ -32,7 +32,7 @@ class BatchManager
         }
         $session = UploadSession::findOrFail($state['session']);
         $this->access->session($session);
-        foreach (['model', 'collection', 'disk', 'max_files', 'max_bytes', 'types', 'field', 'queue', 'connection'] as $key) {
+        foreach (['model', 'collection', 'disk', 'disk_fingerprint', 'max_files', 'max_bytes', 'types', 'field', 'queue', 'connection'] as $key) {
             if (($session->settings[$key] ?? null) !== ($settings[$key] ?? null)) {
                 $this->invalid('Upload field configuration changed; start a new batch.');
             }

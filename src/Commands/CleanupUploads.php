@@ -7,6 +7,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use ScaleXY\FilamentBulkUpload\Models\UploadSession;
 use ScaleXY\FilamentBulkUpload\Support\S3;
+use ScaleXY\FilamentBulkUpload\Support\UploadDisk;
 
 class CleanupUploads extends Command
 {
@@ -26,14 +27,16 @@ class CleanupUploads extends Command
                     if ($session->status === 'submitted' && $session->batch?->status !== 'completed') {
                         return;
                     }
-                    $disk = Storage::disk($session->settings['disk']);
-                    foreach ($session->files as $file) {
-                        $s3->abort($file);
-                        $disk->delete([$file->object_key, str_ends_with($file->object_key, '.sealed') ? substr($file->object_key, 0, -7) : $file->object_key.'.sealed']);
-                        $file->update(['multipart_id' => null]);
-                    }
-                    $disk->deleteDirectory(trim(config('filament-bulk-upload.prefix'), '/').'/'.$session->id);
-                    $session->update(['status' => 'expired']);
+                    app(UploadDisk::class)->run($session->settings, function () use ($session, $s3) {
+                        $disk = Storage::disk($session->settings['disk']);
+                        foreach ($session->files as $file) {
+                            $s3->abort($file);
+                            $disk->delete([$file->object_key, str_ends_with($file->object_key, '.sealed') ? substr($file->object_key, 0, -7) : $file->object_key.'.sealed']);
+                            $file->update(['multipart_id' => null]);
+                        }
+                        $disk->deleteDirectory(trim(config('filament-bulk-upload.prefix'), '/').'/'.$session->id);
+                        $session->update(['status' => 'expired']);
+                    });
                 });
             }
         });

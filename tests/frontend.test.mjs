@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { filePage, isBusy, moveReference } from '../resources/js/state.js'
+import { GRID_SPECS, filePage, isBusy, moveReference } from '../resources/js/state.js'
 
 test('1000 selections render only one page and failures block save', () => {
     const files = Array.from({ length: 1000 }, (_, id) => ({ id, meta: { verified: true } }))
@@ -16,4 +16,16 @@ test('mixed ordering preserves references and handles boundaries', () => {
     assert.deepEqual(moveReference(order, 'upload:a', -1), ['upload:a', 'media:1', 'media:2'])
     assert.deepEqual(moveReference(order, 'media:1', -1), order)
     assert.deepEqual(order, ['media:1', 'upload:a', 'media:2'])
+})
+
+test('grid dimensions define bounded pages including the final partial page', () => {
+    const files = Array.from({ length: 1000 }, (_, id) => id)
+    for (const [spec, { columns, size }] of Object.entries(GRID_SPECS)) {
+        const rows = Number(spec.split('x')[1])
+        assert.equal(columns * rows, size)
+        assert.equal(filePage(files, 1, size).length, size)
+        const lastPage = Math.ceil(files.length / size)
+        assert.equal(filePage(files, lastPage, size).at(-1), 999)
+        assert.equal(filePage(files, lastPage + 1, size).length, 0)
+    }
 })

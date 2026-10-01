@@ -1,11 +1,13 @@
 import Uppy from '@uppy/core'
 import AwsS3 from '@uppy/aws-s3'
-import { PAGE_SIZE, filePage, isBusy, moveReference } from './state.js'
+import { GRID_SPECS, filePage, isBusy, moveReference } from './state.js'
 
 export default function bulkMediaUpload({ state, config }) {
     // Keep Uppy and Blob objects outside Alpine's reactive state.
     let uppy, poll, refreshTimer, alive = true, starting
-    let verifying = 0
+    let verifying = 0, mediaRequest = 0
+    const previews = new Map()
+    const clearPreviews = () => { previews.forEach(url => URL.revokeObjectURL(url)); previews.clear() }
     const verificationQueue = [], pendingVerification = new Map()
     const drainVerification = () => {
         while (verifying < config.concurrency && verificationQueue.length) {
@@ -15,9 +17,17 @@ export default function bulkMediaUpload({ state, config }) {
         }
     }
     return {
-        state, config, rows: [], page: 1, totalPages: 1, totalFiles: 0, progress: 0,
+        state, config, gridSpec: '5x5', mediaLoading: false, rows: [], page: 1, totalPages: 1, totalFiles: 0, progress: 0,
         registering: false, error: '', existing: [], mediaPage: 1, mediaLastPage: 1,
         completedLoaded: false, batch: null, locked: false, ready: false, dragging: false,
+        get pageSize() { return GRID_SPECS[this.gridSpec].size },
+        get gridColumns() { return GRID_SPECS[this.gridSpec].columns },
+        async changeGrid() {
+            if (!GRID_SPECS[this.gridSpec]) this.gridSpec = '5x5'
+            this.page = 1
+            this.refresh()
+            await this.loadMedia(1)
+        },
         async init() {
             uppy = new Uppy({ autoProceed: false, restrictions: { maxNumberOfFiles: config.maxFiles, maxFileSize: config.maxBytes } })
             const operation = (file, action, body = {}) => this.api(`files/${file.meta.uploadId}/${action}`, body)
@@ -56,7 +66,7 @@ export default function bulkMediaUpload({ state, config }) {
         async request(url, body) {
             const response = await fetch(url, { method: 'POST', credentials: 'same-origin', headers: {
                 'Content-Type': 'application/json', 'Accept': 'application/json',
-                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content ?? '',
+                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || window.livewireScriptConfig?.csrf || document.querySelector('script[data-csrf]')?.dataset.csrf || config.csrfToken,
             }, body: JSON.stringify(body) })
             const data = await response.json().catch(() => ({}))
             if (!response.ok) throw new Error(Object.values(data.errors ?? {}).flat()[0] ?? data.message ?? `Request failed (${response.status})`)
@@ -125,16 +135,24 @@ export default function bulkMediaUpload({ state, config }) {
         refresh() {
             const files = uppy.getFiles()
             this.totalFiles = files.length
-            this.totalPages = Math.max(1, Math.ceil(files.length / PAGE_SIZE))
+            this.totalPages = Math.max(1, Math.ceil(files.length / this.pageSize))
             this.page = Math.min(this.page, this.totalPages)
             const bytes = files.reduce((sum, file) => sum + file.size, 0)
             this.progress = bytes ? Math.round(files.reduce((sum, file) => sum + (file.progress.bytesUploaded ?? 0), 0) / bytes * 100) : 0
-            this.rows = filePage(files, this.page).map(file => ({
-                id: file.id, reference: `upload:${file.meta.uploadId}`, name: file.name, size: file.size,
-                progress: file.progress.percentage ?? 0, paused: file.isPaused, multipart: file.size >= 100 * 1024 * 1024,
-                error: file.error || file.meta.verifyError, verified: file.meta.verified,
-                status: file.meta.verified ? 'Uploaded' : file.error || file.meta.verifyError ? 'Failed' : file.isPaused ? 'Paused' : file.progress.uploadComplete ? 'Verifying' : file.progress.uploadStarted ? 'Uploading' : 'Waiting',
-            }))
+            const visible = filePage(files, this.page, this.pageSize)
+            const visibleIds = new Set(visible.map(file => file.id))
+            for (const [id, url] of previews) {
+                if (!visibleIds.has(id)) { URL.revokeObjectURL(url); previews.delete(id) }
+            }
+            this.rows = visible.map(file => {
+                if (file.type?.startsWith('image/') && !previews.has(file.id)) previews.set(file.id, URL.createObjectURL(file.data))
+                return {
+                    preview: previews.get(file.id), id: file.id, reference: `upload:${file.meta.uploadId}`, name: file.name, size: file.size,
+                    progress: file.progress.percentage ?? 0, paused: file.isPaused, multipart: file.size >= 100 * 1024 * 1024,
+                    error: file.error || file.meta.verifyError, verified: file.meta.verified,
+                    status: file.meta.verified ? 'Uploaded' : file.error || file.meta.verifyError ? 'Failed' : file.isPaused ? 'Paused' : file.progress.uploadComplete ? 'Verifying' : file.progress.uploadStarted ? 'Uploading' : 'Waiting',
+                }
+            })
             this.updateBusy()
         },
         changePage(offset) { this.page += offset; this.refresh() },
@@ -151,10 +169,15 @@ export default function bulkMediaUpload({ state, config }) {
             this.state = { ...this.state, remove: this.state.remove.filter(value => value !== id), order: [...this.state.order, `media:${id}`] }
         },
         async loadMedia(page = this.mediaPage) {
+            const request = ++mediaRequest
+            this.mediaLoading = true
             try {
-                const result = await this.api('media', { page })
+                const result = await this.api('media', { page, per_page: this.pageSize })
+                if (!alive || request !== mediaRequest) return
+                if (page > result.last_page) return await this.loadMedia(result.last_page)
                 this.existing = result.data; this.mediaPage = page; this.mediaLastPage = result.last_page
-            } catch (error) { this.error = error.message }
+            } catch (error) { if (request === mediaRequest) this.error = error.message }
+            finally { if (request === mediaRequest) this.mediaLoading = false }
         },
         async loadStatus() {
             this.batch = await this.api('status')
@@ -167,6 +190,7 @@ export default function bulkMediaUpload({ state, config }) {
             this.ready = false
             try {
                 const result = await this.api(action)
+                clearPreviews()
                 uppy.cancelAll()
                 this.state = { session: result.session, order: result.order, remove: result.remove ?? [], busy: false }
                 this.locked = false; this.batch = null; this.completedLoaded = false
@@ -174,6 +198,6 @@ export default function bulkMediaUpload({ state, config }) {
             } catch (error) { this.error = error.message; this.ready = true }
         },
         formatSize(bytes) { return bytes >= 1e9 ? `${(bytes / 1e9).toFixed(2)} GB` : `${(bytes / 1e6).toFixed(2)} MB` },
-        destroy() { alive = false; clearInterval(poll); clearTimeout(refreshTimer); uppy?.destroy() },
+        destroy() { alive = false; clearInterval(poll); clearTimeout(refreshTimer); clearPreviews(); uppy?.destroy() },
     }
 }

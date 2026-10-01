@@ -16,6 +16,7 @@ use ScaleXY\FilamentBulkUpload\Models\UploadSession;
 use ScaleXY\FilamentBulkUpload\Support\Access;
 use ScaleXY\FilamentBulkUpload\Support\Collections;
 use ScaleXY\FilamentBulkUpload\Support\S3;
+use ScaleXY\FilamentBulkUpload\Support\UploadDisk;
 
 class UploadController
 {
@@ -205,12 +206,12 @@ class UploadController
             if (! isset($session->settings['record'])) {
                 return ['data' => [], 'last_page' => 1];
             }
-            $page = $request->validate(['page' => 'sometimes|integer|min:1']);
+            $page = $request->validate(['page' => 'sometimes|integer|min:1', 'per_page' => 'sometimes|integer|in:12,16,25,35']);
             $record = $this->access->record($session->settings);
-            $media = $record->media()->where('collection_name', $session->settings['collection'])->orderBy('order_column')->orderBy('id')->paginate(25, ['*'], 'page', $page['page'] ?? 1);
+            $media = $record->media()->where('collection_name', $session->settings['collection'])->orderBy('order_column')->orderBy('id')->paginate($page['per_page'] ?? 25, ['*'], 'page', $page['page'] ?? 1);
 
             return ['data' => $media->map(fn ($item) => [
-                'id' => (string) $item->id, 'name' => $item->file_name, 'size' => $item->size,
+                'id' => (string) $item->id, 'name' => $item->file_name, 'size' => $item->size, 'mime' => $item->mime_type,
                 'url' => Storage::disk($item->disk)->temporaryUrl($item->getPathRelativeToRoot(), now()->addMinutes(10)),
             ])->all(), 'last_page' => $media->lastPage()];
         });
@@ -281,7 +282,7 @@ class UploadController
             $session = UploadSession::query()->lockForUpdate()->findOrFail($id);
             $this->access->session($session, $writable);
 
-            return $callback($session);
+            return app(UploadDisk::class)->run($session->settings, fn () => $callback($session));
         });
     }
 }

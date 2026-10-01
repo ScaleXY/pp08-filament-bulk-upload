@@ -13,6 +13,7 @@ use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 use ScaleXY\FilamentBulkUpload\Models\UploadBatch;
 use ScaleXY\FilamentBulkUpload\Support\Collections;
+use ScaleXY\FilamentBulkUpload\Support\UploadDisk;
 use Throwable;
 
 class ProcessBatch implements ShouldQueue
@@ -28,6 +29,14 @@ class ProcessBatch implements ShouldQueue
     public function __construct(public string $batchId) {}
 
     public function handle(Collections $collections): void
+    {
+        $batch = UploadBatch::find($this->batchId);
+        if ($batch) {
+            app(UploadDisk::class)->run($batch->session->settings, fn () => $this->process($collections));
+        }
+    }
+
+    protected function process(Collections $collections): void
     {
         $batch = UploadBatch::find($this->batchId);
         if (! $batch || in_array($batch->status, ['completed', 'failed', 'discarded'])) {

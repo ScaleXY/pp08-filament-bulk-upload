@@ -11,6 +11,7 @@ use ScaleXY\FilamentBulkUpload\Models\UploadFile;
 use ScaleXY\FilamentBulkUpload\Models\UploadSession;
 use ScaleXY\FilamentBulkUpload\Support\Access;
 use ScaleXY\FilamentBulkUpload\Support\BatchManager;
+use ScaleXY\FilamentBulkUpload\Support\UploadDisk;
 
 class MinioTest extends TestCase
 {
@@ -32,7 +33,10 @@ class MinioTest extends TestCase
             $record = Document::create(['title' => 'Real S3']);
             $access = app(Access::class);
             $settings = ['model' => Document::class, 'record' => (string) $record->id, 'collection' => 'default', 'disk' => 's3', 'max_files' => 1000,
-                'max_bytes' => 1_000_000_000, 'types' => ['text/plain'], 'field' => 'data.media', 'queue' => 'bulk-uploads', 'connection' => null];
+                'max_bytes' => 1_000_000_000, 'types' => ['text/plain'], 'field' => 'data.media', 'queue' => 'bulk-uploads', 'connection' => null, ...app(UploadDisk::class)->snapshot($disk)];
+            // The named disk may be stale or belong to another tenant in a worker.
+            config(['filesystems.disks.s3.bucket' => 'wrong-tenant']);
+            Storage::forgetDisk('s3');
             $token = Crypt::encrypt(['owner' => $access->owner(), 'tenant' => null, 'expires' => time() + 60, 'settings' => $settings]);
             $sessionId = $this->postJson('/filament-bulk-upload/sessions', ['token' => $token])->assertOk()->json('session');
             $files = $this->postJson("/filament-bulk-upload/{$sessionId}/files", ['files' => [['name' => 'small.txt', 'size' => 5], ['name' => 'large.txt', 'size' => 8 * 1024 * 1024 + 5]]])->assertOk()->json('files');

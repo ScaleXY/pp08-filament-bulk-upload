@@ -11,11 +11,13 @@ class S3
     protected function location(UploadFile $file): array
     {
         $disk = $file->session->settings['disk'];
-        abort_unless(config("filesystems.disks.{$disk}.driver") === 's3', 422, 'An S3 disk is required.');
+        $adapter = Storage::disk($disk);
+        $config = $adapter->getConfig();
+        abort_unless(($config['driver'] ?? null) === 's3', 422, 'An S3 disk is required.');
 
-        return [Storage::disk($disk)->getClient(), [
-            'Bucket' => config("filesystems.disks.{$disk}.bucket"),
-            'Key' => ltrim(trim(config("filesystems.disks.{$disk}.root", ''), '/').'/'.$file->object_key, '/'),
+        return [$adapter->getClient(), [
+            'Bucket' => $config['bucket'],
+            'Key' => $adapter->path($file->object_key),
         ]];
     }
 

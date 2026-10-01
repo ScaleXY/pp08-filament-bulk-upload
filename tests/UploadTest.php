@@ -74,6 +74,26 @@ class UploadTest extends TestCase
         return ['session' => $session->id, 'order' => array_map(fn ($file) => 'upload:'.$file['id'], $files), 'remove' => [], 'busy' => false];
     }
 
+    public function test_existing_media_grid_pagination_is_bounded_and_includes_image_mime(): void
+    {
+        $record = Document::create(['title' => 'Grid']);
+        $session = $this->createSession($record);
+        Storage::fake('s3');
+        Storage::disk('s3')->buildTemporaryUrlsUsing(fn ($path, $expires, $options) => 'https://storage.test/'.$path);
+        for ($i = 1; $i <= 40; $i++) {
+            $record->media()->create(['collection_name' => 'default', 'name' => "Image {$i}", 'file_name' => "image{$i}.png",
+                'mime_type' => 'image/png', 'disk' => 's3', 'size' => 5, 'manipulations' => [], 'custom_properties' => [],
+                'generated_conversions' => [], 'responsive_images' => [], 'order_column' => $i]);
+        }
+        foreach ([12, 16, 25, 35] as $size) {
+            $this->postJson("/filament-bulk-upload/{$session->id}/media", ['per_page' => $size])->assertOk()
+                ->assertJsonCount($size, 'data')->assertJsonPath('last_page', (int) ceil(40 / $size))->assertJsonPath('data.0.mime', 'image/png');
+        }
+        $this->postJson("/filament-bulk-upload/{$session->id}/media", ['per_page' => 12, 'page' => 4])->assertOk()
+            ->assertJsonCount(4, 'data')->assertJsonPath('data.0.name', 'image37.png');
+        $this->postJson("/filament-bulk-upload/{$session->id}/media", ['per_page' => 1000])->assertUnprocessable();
+    }
+
     public function test_registers_one_thousand_files_and_rejects_overflow_atomically(): void
     {
         $session = $this->createSession();

@@ -4,6 +4,7 @@ namespace ScaleXY\FilamentBulkUpload\Support;
 
 use Filament\Facades\Filament;
 use Filament\Models\Contracts\HasTenants;
+use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Support\Facades\Auth;
@@ -13,11 +14,21 @@ use Spatie\MediaLibrary\HasMedia;
 
 class Access
 {
+    public function user(): ?Authenticatable
+    {
+        $guard = config('filament-bulk-upload.auth_guard');
+        if ($guard === null && class_exists(Filament::class)) {
+            $guard = Filament::getCurrentPanel()?->getAuthGuard();
+        }
+
+        return Auth::guard($guard)->user();
+    }
+
     public function owner(): string
     {
-        abort_unless(Auth::user(), 401);
+        abort_unless($user = $this->user(), 401);
 
-        return Auth::user()->getMorphClass().':'.Auth::id();
+        return $user->getMorphClass().':'.$user->getAuthIdentifier();
     }
 
     public function tenant(): ?string
@@ -43,7 +54,7 @@ class Access
         $class = Relation::getMorphedModel($type) ?? $type;
         abort_unless(is_subclass_of($class, Model::class), 403);
         $record = $class::query()->findOrFail($id);
-        $user = Auth::user();
+        $user = $this->user();
         abort_unless($user instanceof HasTenants && $user->canAccessTenant($record), 403);
         Filament::setTenant($record);
     }
@@ -54,9 +65,9 @@ class Access
         $subject = $record ?? $settings['model'];
         $operation = $record ? (($settings['readonly'] ?? false) ? 'view' : 'update') : 'create';
         if ($callback = config('filament-bulk-upload.authorize')) {
-            abort_unless($callback(Auth::user(), $subject, $operation, $this->tenant()), 403);
+            abort_unless($callback($this->user(), $subject, $operation, $this->tenant()), 403);
         } else {
-            Gate::authorize($operation, $subject);
+            Gate::forUser($this->user())->authorize($operation, $subject);
         }
     }
 

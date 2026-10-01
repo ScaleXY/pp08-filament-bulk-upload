@@ -3,6 +3,8 @@
 return [
     'disk' => 's3',
     'prefix' => 'filament-bulk-upload/tmp',
+    // Set this and the route auth middleware for a non-default panel guard.
+    'auth_guard' => null,
     'middleware' => ['web', 'auth'],
     'queue' => 'bulk-uploads',
     'connection' => null,
