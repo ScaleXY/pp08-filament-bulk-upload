@@ -37,7 +37,7 @@ class BulkMediaUpload extends Field
     protected function setUp(): void
     {
         parent::setUp();
-        $this->default(['session' => null, 'order' => [], 'remove' => [], 'busy' => false]);
+        $this->default(['session' => null, 'order' => [], 'remove' => [], 'busy' => false, 'selected' => 0]);
         $this->dehydrated(false);
         $this->rules([fn (BulkMediaUpload $component) => function (string $attribute, mixed $value, Closure $fail) use ($component) {
             if ($component->isDisabled()) {

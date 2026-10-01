@@ -14,6 +14,7 @@ test('1000 files stay paginated and file bytes go only to S3', async ({ page }) 
         let result = {}
         if (path === '/sessions') result = { session: 'batch', order: [] }
         if (path.endsWith('/files')) {
+            expect(await page.evaluate(() => window.Alpine.$data(document.querySelector('#field')).state.selected)).toBe(body.files.length)
             result.files = body.files.map((file, index) => ({ ...file, id: `id-${index}` }))
             ids.push(...result.files.map(file => file.id))
         }
@@ -63,6 +64,7 @@ test('1000 files stay paginated and file bytes go only to S3', async ({ page }) 
         expect(JSON.stringify(request.body)).not.toContain('base64')
     }
     const state = await page.evaluate(() => window.Alpine.$data(document.querySelector('#field')).state)
+    expect(state.selected).toBe(1000)
     expect(state.order).toHaveLength(1000)
     expect(JSON.stringify(state).length).toBeLessThan(30000)
     expect(state).not.toHaveProperty('files')

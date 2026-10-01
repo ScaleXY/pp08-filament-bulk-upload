@@ -16,6 +16,16 @@ class Collections
         }
     }
 
+    /** JSON databases may reorder object keys; preserve row order and normalize each entry. */
+    public function normalizeSnapshot(array $snapshot): array
+    {
+        return array_values(array_map(fn (array $entry) => [
+            'id' => (string) $entry['id'],
+            'version' => (string) $entry['version'],
+            'order' => isset($entry['order']) ? (int) $entry['order'] : null,
+        ], $snapshot));
+    }
+
     public function snapshot(HasMedia $record, string $collection): array
     {
         return $record->media()->where('collection_name', $collection)->orderBy('order_column')->orderBy('id')->get(['id', 'updated_at', 'order_column'])

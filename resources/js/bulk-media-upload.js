@@ -46,7 +46,7 @@ export default function bulkMediaUpload({ state, config }) {
             uppy.on('restriction-failed', (_file, error) => { this.error = error.message })
             uppy.on('upload-success', file => this.verify(file))
             uppy.on('complete', () => this.refresh())
-            this.state ??= { session: null, order: [], remove: [], busy: false }
+            this.state ??= { session: null, order: [], remove: [], busy: false, selected: 0 }
             try {
                 await this.ensureSession()
                 await this.loadMedia()
@@ -59,7 +59,7 @@ export default function bulkMediaUpload({ state, config }) {
             if (this.state.session) return
             if (!starting) starting = (async () => {
                 const result = await this.request(config.endpoint, { token: config.token })
-                this.state = { session: result.session, order: result.order, remove: result.remove ?? [], busy: false }
+                this.state = { session: result.session, order: result.order, remove: result.remove ?? [], busy: false, selected: 0 }
             })()
             try { await starting } finally { starting = null }
         },
@@ -83,6 +83,7 @@ export default function bulkMediaUpload({ state, config }) {
                     catch (error) { this.error = error.message }
                 }
                 if (!added.length) return
+                this.updateBusy()
                 const result = await this.api('files', { files: added.map(id => { const f = uppy.getFile(id); return { name: f.name, size: f.size } }) })
                 result.files.forEach((file, index) => {
                     uppy.setFileMeta(added[index], { uploadId: file.id, verified: false })
@@ -130,7 +131,11 @@ export default function bulkMediaUpload({ state, config }) {
                 this.refresh()
             } catch (error) { this.error = error.message }
         },
-        updateBusy() { const busy = !this.locked && isBusy(uppy.getFiles(), this.registering); if (this.state.busy !== busy) this.state = { ...this.state, busy } },
+        updateBusy() {
+            const files = uppy.getFiles(), selected = files.length
+            const busy = !this.locked && isBusy(files, this.registering)
+            if (this.state.busy !== busy || this.state.selected !== selected) this.state = { ...this.state, busy, selected }
+        },
         scheduleRefresh() { if (!refreshTimer) refreshTimer = setTimeout(() => { refreshTimer = null; if (alive) this.refresh() }, 100) },
         refresh() {
             const files = uppy.getFiles()
@@ -192,7 +197,7 @@ export default function bulkMediaUpload({ state, config }) {
                 const result = await this.api(action)
                 clearPreviews()
                 uppy.cancelAll()
-                this.state = { session: result.session, order: result.order, remove: result.remove ?? [], busy: false }
+                this.state = { session: result.session, order: result.order, remove: result.remove ?? [], busy: false, selected: 0 }
                 this.locked = false; this.batch = null; this.completedLoaded = false
                 await this.loadMedia(); this.ready = true; this.refresh()
             } catch (error) { this.error = error.message; this.ready = true }

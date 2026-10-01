@@ -60,7 +60,7 @@ class ProcessBatch implements ShouldQueue
             }
             // One active batch per record/collection; detect changes made through other media fields.
             $current = $collections->snapshot($record, $batch->collection);
-            $expected = $session->snapshot;
+            $expected = $collections->normalizeSnapshot($session->snapshot);
             $ours = $record->media()->where('collection_name', $batch->collection)->get()->filter(fn ($media) => $media->getCustomProperty('bulk_upload_session') === $session->id)->pluck('id')->map('strval')->all();
             $external = array_values(array_filter($current, fn ($entry) => ! in_array($entry['id'], $ours, true)));
             $expectedExternal = array_values(array_filter($expected, fn ($entry) => ! in_array($entry['id'], $ours, true) && ! in_array($entry['id'], $batch->removals, true)));

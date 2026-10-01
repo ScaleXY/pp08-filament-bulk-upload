@@ -17,7 +17,12 @@ class BatchManager
 
     public function validate(array $state, array $settings): void
     {
-        if ($state['busy'] ?? false) {
+        $selected = $state['selected'] ?? null;
+        if ($selected !== null && (! is_int($selected) || $selected < 0 || $selected > $settings['max_files'])) {
+            $this->invalid('Invalid file selection count.');
+        }
+        // Busy is an advisory browser flag; completed server-verified files can outlive a stale flag.
+        if (($state['busy'] ?? false) && ($selected === null || $selected === 0 || ! ($state['session'] ?? null))) {
             $this->invalid('Wait for uploads to finish, or remove failed files.');
         }
         if (! ($state['session'] ?? null)) {
@@ -61,6 +66,9 @@ class BatchManager
             $this->invalid('Cannot remove media outside this collection.');
         }
         $files = $session->files()->where('status', '!=', 'cancelled')->get();
+        if ($selected !== null && $selected !== $files->count()) {
+            $this->invalid('Wait for uploads to finish, or remove failed files.');
+        }
         if ($files->count() > $settings['max_files'] || $files->contains(fn ($file) => $file->status !== 'uploaded')) {
             $this->invalid('Some files are incomplete or failed.');
         }
@@ -73,7 +81,7 @@ class BatchManager
         }
         if (isset($settings['record'])) {
             $record = $this->access->record($settings);
-            if ($this->collections->snapshot($record, $settings['collection']) !== $session->snapshot) {
+            if ($this->collections->snapshot($record, $settings['collection']) !== $this->collections->normalizeSnapshot($session->snapshot)) {
                 $this->invalid('Media changed in another form. Reload before saving.');
             }
             $this->collections->assertCapacity($record, $settings['collection'], $files->count(), count($removals));

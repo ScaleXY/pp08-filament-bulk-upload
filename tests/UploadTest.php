@@ -281,6 +281,68 @@ class UploadTest extends TestCase
         $this->assertSame('attached', $file->fresh()->status);
     }
 
+    public function test_verified_selection_can_save_with_stale_busy_flag_but_unregistered_selections_cannot(): void
+    {
+        $this->mockS3();
+        $session = $this->createSession();
+        $files = $this->uploaded($session);
+        $state = [...$this->state($session, $files), 'busy' => true, 'selected' => 1];
+        app(BatchManager::class)->validate($state, $session->settings);
+        $this->assertTrue(true);
+        $state['selected'] = 2;
+        $this->expectException(ValidationException::class);
+        $this->expectExceptionMessage('Wait for uploads to finish');
+        app(BatchManager::class)->validate($state, $session->settings);
+    }
+
+    public function test_busy_selection_does_not_allow_unverified_files_even_with_matching_count(): void
+    {
+        $session = $this->createSession();
+        $files = $this->register($session);
+        $state = [...$this->state($session, $files), 'busy' => true, 'selected' => 1];
+        $this->expectException(ValidationException::class);
+        $this->expectExceptionMessage('Some files are incomplete or failed.');
+        app(BatchManager::class)->validate($state, $session->settings);
+    }
+
+    public function test_database_json_key_order_does_not_block_saving_or_removing_media(): void
+    {
+        $this->mockS3();
+        Queue::fake();
+        $record = Document::create(['title' => 'JSON snapshot']);
+        foreach (['first.txt', 'second.txt'] as $name) {
+            Storage::disk('s3')->put($name, 'hello');
+            $record->addMediaFromDisk($name, 's3')->toMediaCollection('default', 's3');
+        }
+        $session = $this->createSession($record);
+        // MySQL JSON stores object keys in its own order, unlike SQLite JSON text.
+        $session->update(['snapshot' => array_map(fn ($entry) => ['id' => $entry['id'], 'order' => $entry['order'], 'version' => $entry['version']], $session->snapshot)]);
+        $files = $this->uploaded($session);
+        $state = $this->state($session, $files);
+        $state['remove'] = [$session->snapshot[0]['id']];
+        $state['order'] = ['media:'.$session->snapshot[1]['id'], ...$state['order']];
+        $batch = app(BatchManager::class)->submit($state, $session->settings, $record);
+        app()->call([new ProcessBatch($batch->id), 'handle']);
+        $this->assertSame('completed', $batch->fresh()->status);
+        $this->assertSame(2, $record->media()->count());
+        $this->assertFalse($record->media()->whereKey($state['remove'][0])->exists());
+    }
+
+    public function test_real_media_changes_still_block_saving_after_json_normalization(): void
+    {
+        $this->mockS3();
+        $record = Document::create(['title' => 'Conflict']);
+        Storage::disk('s3')->put('existing.txt', 'hello');
+        $media = $record->addMediaFromDisk('existing.txt', 's3')->toMediaCollection('default', 's3');
+        $session = $this->createSession($record);
+        $state = $this->state($session, []);
+        $state['order'] = ['media:'.$media->id];
+        $media->update(['order_column' => 2]);
+        $this->expectException(ValidationException::class);
+        $this->expectExceptionMessage('Media changed in another form.');
+        app(BatchManager::class)->validate($state, $session->settings);
+    }
+
     public function test_external_media_change_blocks_batch_and_busy_state_is_rejected(): void
     {
         $this->mockS3();
