@@ -1,0 +1,46 @@
+name: Tests
+on: [push, pull_request]
+jobs:
+  php:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - {php: '8.2', filament: '4', testbench: '10', phpunit: '11'}
+          - {php: '8.3', filament: '5', testbench: '10', phpunit: '11'}
+          - {php: '8.4', filament: '5', testbench: '11', phpunit: '12'}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '${{ matrix.php }}'
+          extensions: fileinfo, pdo_sqlite, exif, intl
+          tools: composer:v2
+      - run: composer update --with 'filament/forms:^${{ matrix.filament }}.0' --with 'orchestra/testbench:^${{ matrix.testbench }}.0' --with 'phpunit/phpunit:^${{ matrix.phpunit }}.0' --no-interaction --prefer-dist
+      - run: vendor/bin/pint --test
+      - run: composer test
+  browser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22', cache: npm}
+      - run: npm ci
+      - run: npm run build && npm test
+      - run: npx playwright install --with-deps chromium
+      - run: npx playwright test
+      - run: git diff --exit-code -- dist/
+  s3:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with: {php-version: '8.4', extensions: 'fileinfo, pdo_sqlite, exif, intl', tools: 'composer:v2'}
+      - uses: actions/setup-go@v5
+        with: {go-version: '1.24'}
+      - run: composer install --no-interaction --prefer-dist
+      - run: go install github.com/minio/minio@RELEASE.2025-04-22T22-12-26Z
+      - run: |
+          MINIO_ROOT_USER=pp08-test-key MINIO_ROOT_PASSWORD=pp08-test-secret "$(go env GOPATH)/bin/minio" server "$RUNNER_TEMP/minio-data" --address 127.0.0.1:19000 > "$RUNNER_TEMP/minio.log" 2>&1 &
+          for attempt in $(seq 1 30); do curl -fsS http://127.0.0.1:19000/minio/health/ready && break; sleep 1; done
+          MINIO_ENDPOINT=http://127.0.0.1:19000 vendor/bin/phpunit --filter MinioTest
