@@ -31,9 +31,10 @@ class ProcessBatch implements ShouldQueue
     public function handle(Collections $collections): void
     {
         $batch = UploadBatch::find($this->batchId);
-        if ($batch) {
-            app(UploadDisk::class)->run($batch->session->settings, fn () => $this->process($collections));
+        if (! $batch) {
+            throw new \RuntimeException('Upload batch not found in the worker database. Check the queue connection and tenant initialization.');
         }
+        app(UploadDisk::class)->run($batch->session->settings, fn () => $this->process($collections));
     }
 
     protected function process(Collections $collections): void

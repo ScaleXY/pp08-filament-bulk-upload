@@ -115,6 +115,7 @@ The field detects the current Filament panel's authentication guard. Package rou
 ```php
 // config/filament-bulk-upload.php
 'auth_guard' => 'tenant_admin',
+'connection' => 'tenant_connection', // The host's tenant-aware queue connection.
 'middleware' => [
     'web',
     \Stancl\Tenancy\Middleware\InitializeTenancyByDomain::class,
@@ -123,6 +124,8 @@ The field detects the current Filament panel's authentication guard. Package rou
 ],
 'tenant_resolver' => [\App\Providers\TenancyServiceProvider::class, 'bulkUploadTenantKey'],
 ```
+
+Stancl tenant uploads must dispatch through a tenant-aware queue connection. A connection configured with `central => true` omits the tenant ID, so the worker cannot find tenant database batches. Set `connection` as above, or use `->queue('bulk-uploads', 'tenant_connection')`, and configure workers for that connection. For a batch previously queued on the wrong connection, initialize its tenant, update its persisted session `settings.connection`, then redispatch `ProcessBatch` under that tenant context. Restart workers after changing application configuration.
 
 Define the static resolver on the application's tenancy provider:
 

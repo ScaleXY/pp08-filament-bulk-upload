@@ -295,6 +295,13 @@ class UploadTest extends TestCase
         app(BatchManager::class)->validate($state, $session->settings);
     }
 
+    public function test_missing_batch_reports_queue_database_or_tenant_misconfiguration(): void
+    {
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('Upload batch not found in the worker database.');
+        app()->call([new ProcessBatch('00000000-0000-4000-8000-000000000000'), 'handle']);
+    }
+
     public function test_busy_selection_does_not_allow_unverified_files_even_with_matching_count(): void
     {
         $session = $this->createSession();
